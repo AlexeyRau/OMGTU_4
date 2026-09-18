@@ -1,7 +1,4 @@
-package lab_0;
-
 import java.util.*;
-import java.util.stream.Collectors;
 
 public class Main {
     public static void main(String[] args) {
@@ -11,12 +8,12 @@ public class Main {
         employees.add(new Manager("Сергей", 120000, 5));
         employees.add(new Manager("Анна", 150000, 12));
 
-        System.out.println("=== Список сотрудников ===");
+        System.out.println("Список сотрудников:");
         for (Employee e : employees) {
             System.out.println(e);
         }
 
-        System.out.println("\n=== Зарплата с учётом бонуса (полиморфизм) ===");
+        System.out.println("\nЗарплата с учётом бонуса:");
         double totalPayroll = 0;
         for (Employee e : employees) {
             double total = e.getSalary() + e.getBonus();
@@ -26,18 +23,11 @@ public class Main {
         }
         System.out.printf("Итого фонд оплаты труда: %.2f%n", totalPayroll);
 
-        System.out.println("\n=== Сортировка по итоговой выплате (Comparator) ===");
+        System.out.println("\nСортировка по итоговой выплате:");
         employees.sort(Comparator.comparingDouble((Employee e) -> e.getSalary() + e.getBonus()).reversed());
         employees.forEach(System.out::println);
 
-        System.out.println("\n=== Группировка по типу (HashMap + Stream API) ===");
-        Map<String, List<Employee>> byType = employees.stream()
-                .collect(Collectors.groupingBy(e -> e.getClass().getSimpleName()));
-        for (Map.Entry<String, List<Employee>> entry : byType.entrySet()) {
-            System.out.println(entry.getKey() + ": " + entry.getValue().size() + " чел.");
-        }
-
-        System.out.println("\n=== Отчёт по интерфейсу Reportable ===");
+        System.out.println("\nОтчёт по интерфейсу:");
         for (Employee e : employees) {
             if (e instanceof Reportable r) {
                 System.out.println(r.report());
