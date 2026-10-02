@@ -1,5 +1,3 @@
-package lab_1;
-
 import java.util.*;
 import java.util.regex.*;
 
