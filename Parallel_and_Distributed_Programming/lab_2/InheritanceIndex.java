@@ -1,119 +1,94 @@
 import java.io.IOException;
-import java.nio.charset.StandardCharsets;
-import java.nio.file.*;
-import java.util.*;
-import java.util.regex.*;
-import java.util.stream.*;
+import java.nio.file.Files;
+import java.nio.file.Path;
+import java.util.ArrayList;
+import java.util.Arrays;
+import java.util.List;
+import java.util.Map;
+import java.util.TreeMap;
+import java.util.regex.Matcher;
+import java.util.regex.Pattern;
+import java.util.stream.Collectors;
+import java.util.stream.Stream;
 
 public class InheritanceIndex {
 
-    private static final Pattern NOISE = Pattern.compile(
-            "\"\"\"[\\s\\S]*?\"\"\"" +
-            "|//[^\\n]*" +
-            "|/\\*[\\s\\S]*?\\*/" +
-            "|\"(?:\\\\.|[^\"\\\\\\n])*\"" +
-            "|'(?:\\\\.|[^'\\\\\\n])*'");
-
     private static final Pattern DECLARATION = Pattern.compile(
-            "(?<![.\\w])(class|interface|enum|record)\\s+([A-Za-z_$][\\w$]*)([^{;]*)\\{");
-
-    private static final Pattern EXTENDS = Pattern.compile(
-            "\\bextends\\s+(.+?)(?=\\s+implements\\b|\\s+permits\\b|$)", Pattern.DOTALL);
-    private static final Pattern IMPLEMENTS = Pattern.compile(
-            "\\bimplements\\s+(.+?)(?=\\s+extends\\b|\\s+permits\\b|$)", Pattern.DOTALL);
-
-    private static final Pattern GENERICS = Pattern.compile("<[^<>]*>");
-    private static final Pattern PARENS = Pattern.compile("\\([^()]*\\)");
+        "\\b(class|interface)\\s+(\\w+)\\s*" 
+        + "(?:extends\\s+([^{]+?))?\\s*" 
+        + "(?:implements\\s+([^{]+?))?\\s*\\{"
+    );
 
     public static void main(String[] args) throws IOException {
-        Path root = Paths.get(args.length > 0 ? args[0] : ".");
-        if (!Files.isDirectory(root)) {
-            System.err.println("Папка не найдена: " + root.toAbsolutePath());
-            return;
-        }
+        Path root = Path.of(args.length > 0 ? args[0] : ".");
 
-        List<Path> files;
-        try (Stream<Path> walk = Files.walk(root)) {
-            files = walk.filter(Files::isRegularFile)
+        Map<String, List<String>> index = new TreeMap<>();
+
+        List<Path> javaFiles;
+        try (Stream<Path> paths = Files.walk(root)) {
+            javaFiles = paths
+                    .filter(p -> Files.isRegularFile(p))
                     .filter(p -> p.toString().endsWith(".java"))
                     .collect(Collectors.toList());
         }
 
-        Map<String, List<String>> index = new TreeMap<>();
-        Set<String> declared = new TreeSet<>();
-
-        for (Path file : files) {
-            String source = Files.readString(file, StandardCharsets.UTF_8);
-            parseSource(source, index, declared);
-        }
-
-        printIndex(index, declared, files.size());
-    }
-
-    private static void parseSource(String source, Map<String, List<String>> index, Set<String> declared) {
-        String clean = NOISE.matcher(source).replaceAll(" ");
-        Matcher m = DECLARATION.matcher(clean);
-
-        while (m.find()) {
-            String child = m.group(2);
-            declared.add(child);
-
-            String header = removeAll(GENERICS, m.group(3));
-            header = removeAll(PARENS, header).trim();
-
-            Stream.concat(
-                    extractParents(EXTENDS, header),
-                    extractParents(IMPLEMENTS, header))
-                  .forEach(parent -> {
-                      List<String> children = index.getOrDefault(parent, new ArrayList<>());
-                      children.add(child);
-                      index.put(parent, children);
-                  });
-        }
-    }
-
-    private static Stream<String> extractParents(Pattern pattern, String header) {
-        Matcher m = pattern.matcher(header);
-        if (!m.find()) {
-            return Stream.empty();
-        }
-        return Arrays.stream(m.group(1).split(","))
-                .map(String::trim)
-                .filter(s -> !s.isEmpty())
-                .map(s -> s.substring(s.lastIndexOf('.') + 1))
-                .map(s -> s.replaceAll("\\s+", ""));
-    }
-
-    private static String removeAll(Pattern p, String s) {
-        String prev;
-        do {
-            prev = s;
-            s = p.matcher(s).replaceAll("");
-        } while (!s.equals(prev));
-        return s;
-    }
-
-    private static void printIndex(Map<String, List<String>> index, Set<String> declared, int fileCount) {
-        System.out.println("Обратный индекс наследования");
-        System.out.println("Проанализировано файлов: " + fileCount);
-        System.out.println("Найдено типов в проекте: " + declared.size());
-        System.out.println("=".repeat(50));
-
-        if (index.isEmpty()) {
-            System.out.println("Отношений наследования не найдено.");
-            return;
+        for (Path file : javaFiles) {
+            processFile(file, index);
         }
 
         index.forEach((parent, children) -> {
-            String mark = declared.contains(parent) ? "" : "  [внешний тип]";
-            System.out.println(parent + mark);
-            children.stream()
-                    .distinct()
+            String line = children.stream()
                     .sorted()
-                    .forEach(c -> System.out.println("    <- " + c));
+                    .collect(Collectors.joining(", "));
+            System.out.println(parent + " <- " + line);
         });
+    }
 
-        System.out.println("=".repeat(50));
-        System.out.println("Всего родительских типов: " + index.size());
+    private static void processFile(Path file, Map<String, List<String>> index) {
+        String text;
+        try {
+            text = Files.readString(file);
+        } catch (IOException e) {
+            System.err.println("Не удалось прочитать файл: " + file);
+            return;
+        }
+
+        text = removeComments(text);
+        text = removeGenerics(text);
+
+        Matcher m = DECLARATION.matcher(text);
+        while (m.find()) {
+            String child = m.group(2);
+            addParents(index, child, m.group(3));
+            addParents(index, child, m.group(4));
+        }
+    }
+
+    private static void addParents(Map<String, List<String>> index, String child, String parentsText) {
+        if (parentsText == null) {
+            return;
+        }
+        Arrays.stream(parentsText.split(","))
+                .map(String::trim)
+                .filter(name -> !name.isEmpty())
+                .map(name -> name.substring(name.lastIndexOf('.') + 1))
+                .forEach(parent -> {
+                    List<String> children = index.getOrDefault(parent, new ArrayList<>());
+                    children.add(child);
+                    index.put(parent, children);
+                });
+    }
+
+    private static String removeComments(String text) {
+        return text.replaceAll("(?s)/\\*.*?\\*/", "").replaceAll("//.*", "");
+    }
+
+    private static String removeGenerics(String text) {
+        String previous;
+        do {
+            previous = text;
+            text = text.replaceAll("<[^<>]*>", "");
+        } while (!text.equals(previous));
+        return text;
     }
 }
