@@ -17,13 +17,12 @@ public class InheritanceIndexThreads {
     private static final Pattern DECLARATION = Pattern.compile(
         "\\b(class|interface)\\s+(\\w+)\\s*"
         + "(?:extends\\s+([^{]+?))?\\s*"
-        + "(?:implements\\s+([^{]+?))?\\s*\\{"
+        + "(?:implements\\s+([^{]+?))?\\s*"
+        + "(?:permits\\s+[^{]+?)?\\s*\\{"
     );
 
     public static void main(String[] args) throws IOException, InterruptedException {
         Path root = Path.of(args.length > 0 ? args[0] : ".");
-
-        Map<String, List<String>> index = new TreeMap<>();
 
         List<Path> javaFiles;
         try (Stream<Path> paths = Files.walk(root)) {
@@ -33,11 +32,18 @@ public class InheritanceIndexThreads {
                     .collect(Collectors.toList());
         }
 
+        List<Map<String, List<String>>> partialIndexes = new ArrayList<>();
+        for (int i = 0; i < javaFiles.size(); i++) {
+            partialIndexes.add(new TreeMap<>());
+        }
+
         CountDownLatch latch = new CountDownLatch(javaFiles.size());
-        for (Path file : javaFiles) {
+        for (int i = 0; i < javaFiles.size(); i++) {
+            Path file = javaFiles.get(i);
+            Map<String, List<String>> localIndex = partialIndexes.get(i);
             new Thread(() -> {
                 try {
-                    processFile(file, index);
+                    processFile(file, localIndex);
                 } finally {
                     latch.countDown();
                 }
@@ -45,8 +51,18 @@ public class InheritanceIndexThreads {
         }
         latch.await();
 
+        Map<String, List<String>> index = new TreeMap<>();
+        for (Map<String, List<String>> partial : partialIndexes) {
+            partial.forEach((parent, children) -> {
+                List<String> all = index.getOrDefault(parent, new ArrayList<>());
+                all.addAll(children);
+                index.put(parent, all);
+            });
+        }
+
         index.forEach((parent, children) -> {
             String line = children.stream()
+                    .distinct()
                     .sorted()
                     .collect(Collectors.joining(", "));
             System.out.println(parent + " <- " + line);
@@ -82,11 +98,9 @@ public class InheritanceIndexThreads {
                 .filter(name -> !name.isEmpty())
                 .map(name -> name.substring(name.lastIndexOf('.') + 1))
                 .forEach(parent -> {
-                    synchronized (index) {
-                        List<String> children = index.getOrDefault(parent, new ArrayList<>());
-                        children.add(child);
-                        index.put(parent, children);
-                    }
+                    List<String> children = index.getOrDefault(parent, new ArrayList<>());
+                    children.add(child);
+                    index.put(parent, children);
                 });
     }
 
