@@ -33,24 +33,17 @@ public class InheritanceIndexThreads {
                     .collect(Collectors.toList());
         }
 
-        long start = System.currentTimeMillis();
-
         CountDownLatch latch = new CountDownLatch(javaFiles.size());
-
         for (Path file : javaFiles) {
-            Thread thread = new Thread(() -> {
+            new Thread(() -> {
                 try {
                     processFile(file, index);
                 } finally {
                     latch.countDown();
                 }
-            });
-            thread.start();
+            }).start();
         }
-
         latch.await();
-
-        long time = System.currentTimeMillis() - start;
 
         index.forEach((parent, children) -> {
             String line = children.stream()
@@ -58,8 +51,6 @@ public class InheritanceIndexThreads {
                     .collect(Collectors.joining(", "));
             System.out.println(parent + " <- " + line);
         });
-
-        System.err.println("Файлов обработано: " + javaFiles.size() + ", время: " + time + " мс");
     }
 
     private static void processFile(Path file, Map<String, List<String>> index) {
@@ -77,8 +68,8 @@ public class InheritanceIndexThreads {
         Matcher m = DECLARATION.matcher(text);
         while (m.find()) {
             String child = m.group(2);
-            addParents(index, child, m.group(3)); // после extends
-            addParents(index, child, m.group(4)); // после implements
+            addParents(index, child, m.group(3));
+            addParents(index, child, m.group(4));
         }
     }
 
@@ -100,8 +91,7 @@ public class InheritanceIndexThreads {
     }
 
     private static String removeComments(String text) {
-        return text.replaceAll("(?s)/\\*.*?\\*/", "")
-                .replaceAll("//.*", "");
+        return text.replaceAll("(?s)/\\*.*?\\*/", "").replaceAll("//.*", "");
     }
 
     private static String removeGenerics(String text) {
