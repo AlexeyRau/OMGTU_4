@@ -17,13 +17,12 @@ public class InheritanceIndexThreads {
     private static final Pattern DECLARATION = Pattern.compile(
         "\\b(class|interface)\\s+(\\w+)\\s*"
         + "(?:extends\\s+([^{]+?))?\\s*"
-        + "(?:implements\\s+([^{]+?))?\\s*\\{"
+        + "(?:implements\\s+([^{]+?))?\\s*"
+        + "(?:permits\\s+[^{]+?)?\\s*\\{"
     );
 
     public static void main(String[] args) throws IOException, InterruptedException {
         Path root = Path.of(args.length > 0 ? args[0] : ".");
-
-        Map<String, List<String>> index = new TreeMap<>();
 
         List<Path> javaFiles;
         try (Stream<Path> paths = Files.walk(root)) {
@@ -33,33 +32,41 @@ public class InheritanceIndexThreads {
                     .collect(Collectors.toList());
         }
 
-        long start = System.currentTimeMillis();
+        List<Map<String, List<String>>> partialIndexes = new ArrayList<>();
+        for (int i = 0; i < javaFiles.size(); i++) {
+            partialIndexes.add(new TreeMap<>());
+        }
 
         CountDownLatch latch = new CountDownLatch(javaFiles.size());
-
-        for (Path file : javaFiles) {
-            Thread thread = new Thread(() -> {
+        for (int i = 0; i < javaFiles.size(); i++) {
+            Path file = javaFiles.get(i);
+            Map<String, List<String>> localIndex = partialIndexes.get(i);
+            new Thread(() -> {
                 try {
-                    processFile(file, index);
+                    processFile(file, localIndex);
                 } finally {
                     latch.countDown();
                 }
-            });
-            thread.start();
+            }).start();
         }
-
         latch.await();
 
-        long time = System.currentTimeMillis() - start;
+        Map<String, List<String>> index = new TreeMap<>();
+        for (Map<String, List<String>> partial : partialIndexes) {
+            partial.forEach((parent, children) -> {
+                List<String> all = index.getOrDefault(parent, new ArrayList<>());
+                all.addAll(children);
+                index.put(parent, all);
+            });
+        }
 
         index.forEach((parent, children) -> {
             String line = children.stream()
+                    .distinct()
                     .sorted()
                     .collect(Collectors.joining(", "));
             System.out.println(parent + " <- " + line);
         });
-
-        System.err.println("Файлов обработано: " + javaFiles.size() + ", время: " + time + " мс");
     }
 
     private static void processFile(Path file, Map<String, List<String>> index) {
@@ -77,8 +84,8 @@ public class InheritanceIndexThreads {
         Matcher m = DECLARATION.matcher(text);
         while (m.find()) {
             String child = m.group(2);
-            addParents(index, child, m.group(3)); // после extends
-            addParents(index, child, m.group(4)); // после implements
+            addParents(index, child, m.group(3));
+            addParents(index, child, m.group(4));
         }
     }
 
@@ -91,17 +98,14 @@ public class InheritanceIndexThreads {
                 .filter(name -> !name.isEmpty())
                 .map(name -> name.substring(name.lastIndexOf('.') + 1))
                 .forEach(parent -> {
-                    synchronized (index) {
-                        List<String> children = index.getOrDefault(parent, new ArrayList<>());
-                        children.add(child);
-                        index.put(parent, children);
-                    }
+                    List<String> children = index.getOrDefault(parent, new ArrayList<>());
+                    children.add(child);
+                    index.put(parent, children);
                 });
     }
 
     private static String removeComments(String text) {
-        return text.replaceAll("(?s)/\\*.*?\\*/", "")
-                .replaceAll("//.*", "");
+        return text.replaceAll("(?s)/\\*.*?\\*/", "").replaceAll("//.*", "");
     }
 
     private static String removeGenerics(String text) {
