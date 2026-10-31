@@ -3,9 +3,9 @@ import java.nio.file.Files;
 import java.nio.file.Path;
 import java.util.ArrayList;
 import java.util.Arrays;
+import java.util.HashMap;
 import java.util.List;
 import java.util.Map;
-import java.util.TreeMap;
 import java.util.concurrent.CountDownLatch;
 import java.util.regex.Matcher;
 import java.util.regex.Pattern;
@@ -32,18 +32,13 @@ public class InheritanceIndexThreads {
                     .collect(Collectors.toList());
         }
 
-        List<Map<String, List<String>>> partialIndexes = new ArrayList<>();
-        for (int i = 0; i < javaFiles.size(); i++) {
-            partialIndexes.add(new TreeMap<>());
-        }
+        Map<String, List<String>> index = new HashMap<>();
 
         CountDownLatch latch = new CountDownLatch(javaFiles.size());
-        for (int i = 0; i < javaFiles.size(); i++) {
-            Path file = javaFiles.get(i);
-            Map<String, List<String>> localIndex = partialIndexes.get(i);
+        for (Path file : javaFiles) {
             new Thread(() -> {
                 try {
-                    processFile(file, localIndex);
+                    processFile(file, index);
                 } finally {
                     latch.countDown();
                 }
@@ -51,22 +46,15 @@ public class InheritanceIndexThreads {
         }
         latch.await();
 
-        Map<String, List<String>> index = new TreeMap<>();
-        for (Map<String, List<String>> partial : partialIndexes) {
-            partial.forEach((parent, children) -> {
-                List<String> all = index.getOrDefault(parent, new ArrayList<>());
-                all.addAll(children);
-                index.put(parent, all);
-            });
-        }
-
-        index.forEach((parent, children) -> {
-            String line = children.stream()
-                    .distinct()
-                    .sorted()
-                    .collect(Collectors.joining(", "));
-            System.out.println(parent + " <- " + line);
-        });
+        index.entrySet().stream()
+                .sorted(Map.Entry.comparingByKey())
+                .forEach(entry -> {
+                    String line = entry.getValue().stream()
+                            .distinct()
+                            .sorted()
+                            .collect(Collectors.joining(", "));
+                    System.out.println(entry.getKey() + " <- " + line);
+                });
     }
 
     private static void processFile(Path file, Map<String, List<String>> index) {
