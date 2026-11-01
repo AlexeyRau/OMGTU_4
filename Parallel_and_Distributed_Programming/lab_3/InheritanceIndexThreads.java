@@ -5,6 +5,7 @@ import java.util.ArrayList;
 import java.util.Arrays;
 import java.util.HashMap;
 import java.util.List;
+import java.util.Locale;
 import java.util.Map;
 import java.util.concurrent.CountDownLatch;
 import java.util.regex.Matcher;
@@ -22,6 +23,8 @@ public class InheritanceIndexThreads {
     );
 
     public static void main(String[] args) throws IOException, InterruptedException {
+        long startNanos = System.nanoTime();
+
         Path root = Path.of(args.length > 0 ? args[0] : ".");
 
         List<Path> javaFiles;
@@ -46,15 +49,23 @@ public class InheritanceIndexThreads {
         }
         latch.await();
 
-        index.entrySet().stream()
-                .sorted(Map.Entry.comparingByKey())
-                .forEach(entry -> {
-                    String line = entry.getValue().stream()
-                            .distinct()
-                            .sorted()
-                            .collect(Collectors.joining(", "));
-                    System.out.println(entry.getKey() + " <- " + line);
-                });
+        List<Map.Entry<String, List<String>>> entries = new ArrayList<>();
+        index.forEach((parent, children) -> entries.add(Map.entry(parent, children)));
+        entries.sort(Map.Entry.comparingByKey());
+
+        int totalChildren = 0;
+        for (Map.Entry<String, List<String>> entry : entries) {
+            List<String> uniqueChildren = entry.getValue().stream()
+                    .distinct()
+                    .sorted()
+                    .toList();
+            System.out.println(entry.getKey() + " <- " + String.join(", ", uniqueChildren));
+            totalChildren += uniqueChildren.size();
+        }
+        System.out.println("Всего детей: " + totalChildren);
+
+        double elapsedSeconds = (System.nanoTime() - startNanos) / 1_000_000_000.0;
+        System.err.printf(Locale.ROOT, "Время выполнения: %.3f с%n", elapsedSeconds);
     }
 
     private static void processFile(Path file, Map<String, List<String>> index) {

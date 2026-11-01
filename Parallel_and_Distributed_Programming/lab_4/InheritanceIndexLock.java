@@ -4,6 +4,7 @@ import java.nio.file.Path;
 import java.util.ArrayList;
 import java.util.Arrays;
 import java.util.List;
+import java.util.Locale;
 import java.util.Map;
 import java.util.TreeMap;
 import java.util.concurrent.locks.ReentrantLock;
@@ -22,6 +23,8 @@ public class InheritanceIndexLock {
     );
 
     public static void main(String[] args) throws IOException, InterruptedException {
+        long startNanos = System.nanoTime();
+
         Path root = Path.of(args.length > 0 ? args[0] : ".");
 
         List<Path> javaFiles;
@@ -32,7 +35,6 @@ public class InheritanceIndexLock {
                     .collect(Collectors.toList());
         }
 
-        // Единый индекс и объект синхронизации, который защищает доступ к нему
         Map<String, List<String>> index = new TreeMap<>();
         ReentrantLock lock = new ReentrantLock();
 
@@ -43,18 +45,23 @@ public class InheritanceIndexLock {
             thread.start();
         }
 
-        // Главный поток ждёт завершения всех потоков
         for (Thread thread : threads) {
             thread.join();
         }
 
-        index.forEach((parent, children) -> {
-            String line = children.stream()
+        int totalChildren = 0;
+        for (Map.Entry<String, List<String>> entry : index.entrySet()) {
+            List<String> uniqueChildren = entry.getValue().stream()
                     .distinct()
                     .sorted()
-                    .collect(Collectors.joining(", "));
-            System.out.println(parent + " <- " + line);
-        });
+                    .toList();
+            System.out.println(entry.getKey() + " <- " + String.join(", ", uniqueChildren));
+            totalChildren += uniqueChildren.size();
+        }
+        System.out.println("Всего детей: " + totalChildren);
+
+        double elapsedSeconds = (System.nanoTime() - startNanos) / 1_000_000_000.0;
+        System.err.printf(Locale.ROOT, "Время выполнения: %.3f с%n", elapsedSeconds);
     }
 
     private static void processFile(Path file, Map<String, List<String>> index, ReentrantLock lock) {
