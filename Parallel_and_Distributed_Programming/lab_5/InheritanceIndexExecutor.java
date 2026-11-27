@@ -8,6 +8,7 @@ import java.util.List;
 import java.util.Locale;
 import java.util.Map;
 import java.util.TreeMap;
+import java.util.concurrent.Callable;
 import java.util.concurrent.ExecutionException;
 import java.util.concurrent.ExecutorService;
 import java.util.concurrent.Executors;
@@ -26,7 +27,7 @@ public class InheritanceIndexExecutor {
         + "(?:permits\\s+[^{]+?)?\\s*\\{"
     );
 
-    public static void main(String[] args) throws IOException, InterruptedException, ExecutionException {
+    public static void main(String[] args) throws IOException, InterruptedException {
         long startNanos = System.nanoTime();
 
         Path root = Path.of(args.length > 0 ? args[0] : ".");
@@ -37,31 +38,30 @@ public class InheritanceIndexExecutor {
         List<Path> javaFiles;
         try (Stream<Path> paths = Files.walk(root)) {
             javaFiles = paths
-                    .filter(Files::isRegularFile)
+                    .filter(p -> Files.isRegularFile(p))
                     .filter(p -> p.toString().endsWith(".java"))
                     .collect(Collectors.toList());
         }
 
-        System.err.println("Файлов: " + javaFiles.size() + ", потоков в пуле: " + threadCount);
+        Map<String, List<String>> index = new TreeMap<>();
 
         ExecutorService executor = Executors.newFixedThreadPool(threadCount);
-        List<Future<Map<String, List<String>>>> futures = new ArrayList<>();
         try {
+            List<Future<Map<String, List<String>>>> futures = new ArrayList<>();
             for (Path file : javaFiles) {
-                futures.add(executor.submit(() -> processFile(file)));
+                Callable<Map<String, List<String>>> task = () -> processFile(file);
+                futures.add(executor.submit(task));
+            }
+
+            for (Future<Map<String, List<String>>> future : futures) {
+                try {
+                    mergeInto(index, future.get());
+                } catch (ExecutionException e) {
+                    System.err.println("Ошибка обработки файла: " + e.getCause());
+                }
             }
         } finally {
             executor.shutdown();
-        }
-
-        Map<String, List<String>> index = new TreeMap<>();
-        for (Future<Map<String, List<String>>> future : futures) {
-            Map<String, List<String>> partial = future.get();
-            partial.forEach((parent, children) -> {
-                List<String> all = index.getOrDefault(parent, new ArrayList<>());
-                all.addAll(children);
-                index.put(parent, all);
-            });
         }
 
         int totalChildren = 0;
@@ -76,18 +76,18 @@ public class InheritanceIndexExecutor {
         System.out.println("Всего детей: " + totalChildren);
 
         double elapsedSeconds = (System.nanoTime() - startNanos) / 1_000_000_000.0;
-        System.err.printf(Locale.ROOT, "Время выполнения: %.3f с%n", elapsedSeconds);
+        System.err.printf(Locale.ROOT, "Потоков: %d, время выполнения: %.3f с%n", threadCount, elapsedSeconds);
     }
 
     private static Map<String, List<String>> processFile(Path file) {
-        Map<String, List<String>> partial = new HashMap<>();
+        Map<String, List<String>> localIndex = new HashMap<>();
 
         String text;
         try {
             text = Files.readString(file);
         } catch (IOException e) {
             System.err.println("Не удалось прочитать файл: " + file);
-            return partial;
+            return localIndex;
         }
 
         text = removeComments(text);
@@ -96,10 +96,18 @@ public class InheritanceIndexExecutor {
         Matcher m = DECLARATION.matcher(text);
         while (m.find()) {
             String child = m.group(2);
-            addParents(partial, child, m.group(3));
-            addParents(partial, child, m.group(4));
+            addParents(localIndex, child, m.group(3));
+            addParents(localIndex, child, m.group(4));
         }
-        return partial;
+        return localIndex;
+    }
+
+    private static void mergeInto(Map<String, List<String>> index, Map<String, List<String>> part) {
+        part.forEach((parent, children) -> {
+            List<String> all = index.getOrDefault(parent, new ArrayList<>());
+            all.addAll(children);
+            index.put(parent, all);
+        });
     }
 
     private static void addParents(Map<String, List<String>> index, String child, String parentsText) {
