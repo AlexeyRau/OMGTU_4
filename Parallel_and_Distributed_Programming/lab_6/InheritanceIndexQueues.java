@@ -87,8 +87,7 @@ public class InheritanceIndexQueues {
                 threadCount, elapsedSeconds);
     }
 
-    private static void runWorker(BlockingQueue<Path> tasks,
-                                  BlockingQueue<Map<String, List<String>>> results) {
+    private static void runWorker(BlockingQueue<Path> tasks, BlockingQueue<Map<String, List<String>>> results) {
         try {
             while (true) {
                 Path file = tasks.take();
